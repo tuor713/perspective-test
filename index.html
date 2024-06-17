@@ -18,6 +18,7 @@
             src="https://unpkg.com/@babel/standalone@latest/babel.min.js"
             crossorigin="anonymous"
         ></script>
+
         <!-- Fonts to support Material Design -->
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -60,174 +61,240 @@
         />
 
         <style>
-            perspective-viewer {
-                position: absolute;
-                top: 200;
-                left: 200;
-                right: 200;
-                bottom: 0;
+            body {
+                padding: 5px;
+            }
+
+            #drilldown {
+                width: 100%;
+                height: 400;
+            }
+
+            #overall {
+                display: flex;
+            }
+
+            h2 {
+                padding: 10px;
+                margin: 0px;
+            }
+
+            nav {
+                width: 200px;
+            }
+
+            li {
+                list-style-type: none;
+            }
+
+            #sidebar {
+                padding: 5;
+                display: flex;
+                flex-direction: column;
+                row-gap: 10px;
+            }
+
+            #summary {
+                flex: 1;
+                order: 1;
+            }
+
+            #viewer {
+                width: auto;
+                height: 400;
+            }
+
+            #graph {
+                width: 600;
+                order: 2;
             }
         </style>
     </head>
     <body>
-        <div id="root"></div>
+        <h2>Risk Dashboard</h2>
+        <div id="overall">
+            <nav id="root"></nav>
+            <div id="summary">
+                <h3>Summary</h3>
+                <perspective-viewer id="viewer"></perspective-viewer>
+            </div>
 
-        <perspective-viewer id="viewer" editable></perspective-viewer>
+            <perspective-viewer id="graph"></perspective-viewer>
+        </div>
+
+        <h3>Details</h3>
+        <perspective-viewer id="drilldown"></perspective-viewer>
 
         <script type="text/babel">
+            document.setupUI = function () {
+                const {
+                    colors,
+                    Autocomplete,
+                    CssBaseline,
+                    ThemeProvider,
+                    Typography,
+                    Select,
+                    TextField,
+                    Grid,
+                    Container,
+                    SelectChangeEvent,
+                    InputLabel,
+                    createTheme,
+                    MenuItem,
+                    Box,
+                    SvgIcon,
+                    Link,
+                } = MaterialUI;
 
-            document.setupUI = function() {
-            const {
-                colors,
-                CssBaseline,
-                ThemeProvider,
-                Typography,
-                Select,
-                Grid,
-                Container,
-                SelectChangeEvent,
-                InputLabel,
-                createTheme,
-                MenuItem,
-                Box,
-                SvgIcon,
-                Link,
-            } = MaterialUI;
-
-            // Create a theme instance.
-            const theme = createTheme({
-                palette: {
-                    primary: {
-                        main: "#556cd6",
+                // Create a theme instance.
+                const theme = createTheme({
+                    palette: {
+                        primary: {
+                            main: "#556cd6",
+                        },
+                        secondary: {
+                            main: "#19857b",
+                        },
+                        error: {
+                            main: colors.red.A400,
+                        },
                     },
-                    secondary: {
-                        main: "#19857b",
-                    },
-                    error: {
-                        main: colors.red.A400,
-                    },
-                },
-            });
+                });
 
-            function App() {
-                const [book, setBook] = React.useState([]);
-                const [biz, setBiz] = React.useState([]);
-                const [allBooks, setAllBooks] = React.useState([]);
+                let filters = {};
 
-                if (allBooks.length == 0) {
-                  document.getAllBooks().then((value) => {
-                    console.log('App', value);
-                    setAllBooks(value);
-                  });
-                }
+                const updateFilters = function (column, values) {
+                    filters[column] = values;
 
-                const updateFilters = (books, biz) => {
-                  let filters = [];
-                  if (books.length > 0) {
-                    filters.push(['book', 'in', books]);
-                  }
-                  if (biz.length > 0) {
-                    filters.push(['MHLLevel6', 'in', biz]);
-                  }
-                  document.getElementById("viewer").restore({filter:filters});
+                    let filterArray = Object.entries(filters).flatMap((x) => {
+                        if (x[1].length == 0) {
+                            return [];
+                        } else {
+                            return [[x[0], "in", x[1]]];
+                        }
+                    });
+
+                    console.log("New filter", filterArray);
+                    document
+                        .getElementById("viewer")
+                        .restore({ filter: filterArray });
+                    document
+                        .getElementById("graph")
+                        .restore({ filter: filterArray });
+                    document
+                        .getElementById("drilldown")
+                        .restore({ filter: filterArray });
                 };
 
-                const handleChange = (event: SelectChangeEvent) => {
-                  const value = event.target.value;
-                  const vs = typeof value === 'string' ? value.split(',') : value;
-                  setBook(vs);
-                  updateFilters(vs, biz);
+                function Slicer({ column, label }) {
+                    const [value, setValue] = React.useState([]);
+                    const [options, setOptions] = React.useState([]);
+
+                    if (options.length == 0) {
+                        window.columnValues(column).then((value) => {
+                            console.log("Column choices ", column, value);
+                            setOptions(value);
+                        });
+                    }
+
+                    const handleChange = (event, newValue) => {
+                        setValue(newValue);
+                        updateFilters(column, newValue);
+                    };
+
+                    return (
+                        <Autocomplete
+                            id={column + "-select"}
+                            value={value}
+                            onChange={handleChange}
+                            size="small"
+                            options={options}
+                            getOptionLabel={(it) => it}
+                            renderInput={(params) => (
+                                <TextField
+                                    {...params}
+                                    variant="standard"
+                                    placeholder={label}
+                                />
+                            )}
+                            multiple
+                            label={label}
+                        ></Autocomplete>
+                    );
                 }
 
-                const handleBizChange = (event: SelectChangeEvent) => {
-                  const value = event.target.value;
-                  const vs = typeof value === 'string' ? value.split(',') : value;
-                  setBiz(vs);
-                  updateFilters(book, vs);
+                function App() {
+                    return (
+                        <div id="sidebar">
+                            <h3>Filters</h3>
+                            <Slicer column="book" label="Book"></Slicer>
+                            <Slicer column="hierarchy1" label="Level1"></Slicer>
+                            <Slicer column="hierarchy2" label="Level2"></Slicer>
+                            <Slicer column="hierarchy3" label="Level3"></Slicer>
+                            <Slicer column="product" label="Product"></Slicer>
+                        </div>
+                    );
                 }
 
-
-                return (
-                    <Container maxWidth="sm">
-                        <Grid container spacing={2}>
-                          <Grid item xs={4}>
-                            <InputLabel id='book-label'>Book</InputLabel>
-                            <Select id="boolSelect" value={book} onChange={handleChange} multiple
-                              labelId='book-label'
-                              label='Book'>
-                              {allBooks.map(function (it) {
-                                return <MenuItem value={it}>{it}</MenuItem>;
-                              })}
-                            </Select>
-                          </Grid>
-                          <Grid item xs={4}>
-                            <InputLabel id='business-label'>MHLLevel6</InputLabel>
-                            <Select id="businessSelect" value={biz} onChange={handleBizChange} multiple
-                              labelId='business-label'
-                              label='MHLLevel6'>
-                              {['Flow', 'Emct', 'Structured'].map(function (it) {
-                                return <MenuItem value={it}>{it}</MenuItem>;
-                              })}
-                            </Select>
-                          </Grid>
-                          </Grid>
-                    </Container>
+                const root = ReactDOM.createRoot(
+                    document.getElementById("root"),
                 );
-            }
-
-            const root = ReactDOM.createRoot(document.getElementById("root"));
-            root.render(
-                <ThemeProvider theme={theme}>
-                    {/* CssBaseline kickstart an elegant, consistent, and simple baseline to build upon. */}
-                    <CssBaseline />
-                    <App />
-                </ThemeProvider>,
-            );
-
-            }
+                root.render(
+                    <ThemeProvider theme={theme}>
+                        {/* CssBaseline kickstart an elegant, consistent, and simple baseline to build upon. */}
+                        <CssBaseline />
+                        <App />
+                    </ThemeProvider>,
+                );
+            };
         </script>
 
         <script type="module">
             import perspective from "https://cdn.jsdelivr.net/npm/@finos/perspective@2.10.0/dist/cdn/perspective.js";
 
             window.addEventListener("DOMContentLoaded", async function () {
-                // Create a client that expects a Perspective server
-                // to accept connections at the specified URL.
-                const websocket = perspective.websocket(
-                    "ws://localhost:8888/websocket",
-                );
-
                 const WORKER = perspective.worker();
                 const REQ = fetch("./data.lz4.arrow");
                 const resp = await REQ;
                 const arrow = await resp.arrayBuffer();
                 const table = await WORKER.table(arrow);
 
-                /*
-                // Get a handle to the Table on the server
-                const server_table =
-                    await websocket.open_table("data_source_one");
-
-                const server_view = await server_table.view();
-                const table = await WORKER.table(server_view);
-                */
-
                 document.data = table;
 
                 // Load the client table in the `<perspective-viewer>`.
                 document.getElementById("viewer").load(table);
+                document.getElementById("viewer").restore({
+                    group_by: ["hierarchy1", "book"],
+                    columns: [
+                        "pv",
+                        "notional",
+                        "cr01",
+                        "jumptodefault",
+                        "tradeId",
+                    ],
+                    aggregates: { tradeId: "count" },
+                });
 
-                document.getAllBooks = async function () {
-                    const client_view = await document.data.view({
-                        columns: [],
-                        group_by: ["book"],
-                    });
-                    const books = await client_view.to_columns();
-                    return books["__ROW_PATH__"].flatMap((it) => it);
-                };
+                document.getElementById("drilldown").load(table);
+                document.getElementById("graph").load(table);
+                document.getElementById("graph").restore({
+                    plugin: "Y Bar",
+                    group_by: ["product"],
+                    columns: ["pv"],
+                });
 
                 document.setupUI();
             });
+
+            window.columnValues = async function (column) {
+                console.log("Getting column options", column);
+                const client_view = await document.data.view({
+                    columns: [],
+                    group_by: [column],
+                });
+                const books = await client_view.to_columns();
+                return books["__ROW_PATH__"].flatMap((it) => it);
+            };
         </script>
     </body>
 </html>

@@ -11,15 +11,33 @@ import pyarrow.feather as feather
 
 print('Starting data generation')
 N = 10000
+BOOKS = ["CDSBOOK", "EMSOV", "ALGOBOOK", "IGBOOK", "HYBOOK", "EUROCORP"]
+HIERARCHY = {
+    "CDSBOOK": ["Flow", "NAM IG", "CDS"],
+    "EMSOV": ["Emct", "LATAM", "Sov"],
+    "ALGOBOOK": ["Flow", "NAM IG", "Algo"],
+    "IGBOOK": ["Flow", "NAM IG", "Corp"],
+    "HYBOOK": ["Flow", "NAM HY", "Corp"],
+    "EUROCORP": ["Flow", "EMEA IG", "Corp"]
+}
+PRODUCTS = ["Bond", "CDS", "IRS", "Loan"]
+
 datamap = {
     "tradeId": np.arange(N),
+    "notional": 2000000 * (np.random.rand(N) - 0.5),
     "pv": 2000000 * (np.random.rand(N) - 0.5),
+    "cr01": 2000 * (np.random.rand(N) - 0.5),
+    "jumptodefault": 2000000 * (np.random.rand(N) - 0.5),
     "bool": [i % 2 == 0 for i in range(N)],
     "date": [date.today() for i in range(N)],
     "datetime": [datetime.now() for i in range(N)],
-    "book": np.random.choice(["CDSBOOK", "EMBOOK", "ALGOBOOK", "IGBOOK", "HYBOOK"], N),
-    "MHLLevel6": np.random.choice(["Flow", "Emct", "Structured"], N)
+    "book": np.random.choice(BOOKS, N),
+    "product": np.random.choice(PRODUCTS, N)
 }
+
+datamap['hierarchy1'] = [HIERARCHY[b][0] for b in datamap['book']]
+datamap['hierarchy2'] = [HIERARCHY[b][1] for b in datamap['book']]
+datamap['hierarchy3'] = [HIERARCHY[b][2] for b in datamap['book']]
 
 for i in range(50):
     datamap[f"s{i}"] = [str(j) for j in range(N)]
