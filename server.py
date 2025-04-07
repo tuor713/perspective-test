@@ -8,9 +8,12 @@ import numpy as np
 import pandas as pd
 import perspective
 import pyarrow.feather as feather
+import pyarrow as pa
+import trino
+import json
 
 print('Starting data generation')
-N = 10000
+N = 100000
 BOOKS = ["CDSBOOK", "EMSOV", "ALGOBOOK", "IGBOOK", "HYBOOK", "EUROCORP"]
 HIERARCHY = {
     "CDSBOOK": ["Flow", "NAM IG", "CDS"],
@@ -51,18 +54,79 @@ data.to_parquet('data.parquet')
 # Create an instance of PerspectiveManager, and host a Table
 MANAGER = PerspectiveManager()
 print('Creating perspective table')
-TABLE = Table(data)
+# TABLE = Table(data)
 
 print('Initialized perspective')
 
 # The Table is exposed at `localhost:8888/websocket` with the name `data_source`
-MANAGER.host_table("data_source_one", TABLE)
+# MANAGER.host_table("data_source_one", TABLE)
 
 print('Registered table manager')
+
+class TrinoArrowHandler(tornado.web.RequestHandler):
+    def set_default_headers(self):
+        # Allow CORS if needed
+        self.set_header("Access-Control-Allow-Origin", "*")
+        self.set_header("Access-Control-Allow-Headers", "Content-Type")
+        self.set_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+
+    def options(self):
+        # Handle preflight requests
+        self.set_status(204)
+        self.finish()
+
+    async def post(self):
+        try:
+            # Parse request body as JSON
+            request_data = json.loads(self.request.body)
+
+            # Extract query and connection parameters
+            query = request_data.get('query')
+            if not query:
+                raise ValueError("Missing required 'query' parameter")
+
+            # Optional connection parameters with defaults
+            host = request_data.get('host', 'localhost')
+            port = request_data.get('port', 8080)
+            user = request_data.get('user','admin')
+            password = request_data.get('password', None)
+            catalog = request_data.get('catalog', 'default')
+            schema = request_data.get('schema', 'default')
+
+            # Connect to Trino
+            conn = trino.dbapi.connect(
+                host=host,
+                port=port,
+                user=user,
+                catalog=catalog,
+                schema=schema
+            )
+
+            df = pd.read_sql(query, conn)
+
+            # Convert DataFrame to Arrow Table
+            table = pa.Table.from_pandas(df)
+
+            # Serialize to Arrow IPC format
+            sink = pa.BufferOutputStream()
+            writer = pa.ipc.new_stream(sink, table.schema)
+            writer.write_table(table)
+            writer.close()
+            arrow_bytes = sink.getvalue().to_pybytes()
+
+            # Set appropriate headers and return the Arrow IPC bytes
+            self.set_header('Content-Type', 'application/octet-stream')
+            self.write(arrow_bytes)
+
+        except Exception as e:
+            print(e)
+            self.set_status(500)
+            self.write({"error": str(e)})
 
 app = tornado.web.Application([
     # create a websocket endpoint that the client JavaScript can access
     (r"/websocket", PerspectiveTornadoHandler, {"manager": MANAGER, "check_origin": True}),
+    (r"/trino", TrinoArrowHandler),
     (r"/(.*)", tornado.web.StaticFileHandler, {"path":"./", "default_filename":"index.html"}),
 ])
 

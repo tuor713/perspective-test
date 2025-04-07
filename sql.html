@@ -1,0 +1,132 @@
+<html>
+    <head>
+        <script
+            type="module"
+            src="https://cdn.jsdelivr.net/npm/@finos/perspective/dist/cdn/perspective.js"
+        ></script>
+
+        <script
+            type="module"
+            src="https://cdn.jsdelivr.net/npm/@finos/perspective-viewer/dist/cdn/perspective-viewer.js"
+        ></script>
+        <script
+            type="module"
+            src="https://cdn.jsdelivr.net/npm/@finos/perspective-viewer-datagrid/dist/cdn/perspective-viewer-datagrid.js"
+        ></script>
+        <script
+            type="module"
+            src="https://cdn.jsdelivr.net/npm/@finos/perspective-viewer-d3fc/dist/cdn/perspective-viewer-d3fc.js"
+        ></script>
+
+        <link
+            rel="stylesheet"
+            crossorigin="anonymous"
+            href="https://cdn.jsdelivr.net/npm/@finos/perspective-viewer/dist/css/themes.css"
+        />
+        <link
+            rel="stylesheet"
+            crossorigin="anonymous"
+            href="https://cdn.jsdelivr.net/npm/@finos/perspective-viewer/dist/css/pro.css"
+        />
+        <style type="text/css">
+            #sqleditor {
+                width: 80%;
+                margin-top: 2em;
+                margin-left: 2em;
+            }
+
+            #run {
+                margin-top: 2em;
+                margin-left: 2em;
+            }
+
+            #result {
+                width: 80%;
+                height: 50%;
+            }
+        </style>
+    </head>
+
+    <body>
+        <div id="sqleditor"></div>
+
+        <button id="run" onclick="window.runHandler()">Run</button>
+
+        <span id="error" style="display: none"></span>
+        <perspective-viewer id="result"></perspective-viewer>
+
+        <script type="module">
+            // lots of trial and error to get the version of @codemirror/state to work
+            import {
+                EditorView,
+                keymap,
+            } from "https://cdn.jsdelivr.net/npm/@codemirror/view@6.33.0/+esm";
+            import { sql } from "https://cdn.jsdelivr.net/npm/@codemirror/lang-sql@6.8.0/+esm";
+            import {
+                indentOnInput,
+                defaultHighlightStyle,
+                syntaxHighlighting,
+            } from "https://cdn.jsdelivr.net/npm/@codemirror/language@6.10.3/+esm";
+            import { defaultKeymap } from "https://cdn.jsdelivr.net/npm/@codemirror/commands@6.8.1/+esm";
+
+            let myView = new EditorView({
+                doc: "SELECT * FROM data",
+                extensions: [
+                    sql(),
+                    indentOnInput(),
+                    syntaxHighlighting(defaultHighlightStyle),
+                    keymap.of([...defaultKeymap]),
+                ],
+                parent: document.getElementById("sqleditor"),
+            });
+
+            import perspective from "https://cdn.jsdelivr.net/npm/@finos/perspective/dist/cdn/perspective.js";
+
+            const CLIENT_WASM =
+                "https://cdn.jsdelivr.net/npm/@finos/perspective-viewer/dist/wasm/perspective-viewer.wasm";
+
+            window.addEventListener("DOMContentLoaded", async function () {
+                console.log("Loading perspective");
+                await Promise.all([fetch(CLIENT_WASM)]);
+                console.log("Loaded wasm");
+
+                const WORKER = await perspective.worker();
+                console.log("Loaded perspective", WORKER);
+
+                window.runHandler = async function () {
+                    document.getElementById("error").style.display = "none";
+
+                    const query = myView.state.doc.toString();
+                    console.log("Run", query);
+
+                    // call /trino POST endpoint with JSON body
+                    const REQ = fetch("./trino", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({
+                            query: query,
+                            user: "admin",
+                        }),
+                    });
+
+                    const resp = await REQ;
+
+                    if (resp.ok) {
+                        const arrow = await resp.arrayBuffer();
+                        const table = await WORKER.table(arrow);
+
+                        document.getElementById("result").load(table);
+                    } else {
+                        const respJson = await resp.json();
+                        document.getElementById("error").innerText =
+                            respJson.error;
+                        document.getElementById("error").style.display =
+                            "block";
+                    }
+                };
+            });
+        </script>
+    </body>
+</html>

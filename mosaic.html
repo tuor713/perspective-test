@@ -1,0 +1,315 @@
+<html>
+    <head>
+        <script
+            type="module"
+            src="https://cdn.jsdelivr.net/npm/@finos/perspective/dist/cdn/perspective.js"
+        ></script>
+        <script
+            type="module"
+            src="https://cdn.jsdelivr.net/npm/@finos/perspective-viewer/dist/cdn/perspective-viewer.js"
+        ></script>
+        <script
+            type="module"
+            src="https://cdn.jsdelivr.net/npm/@finos/perspective-viewer-datagrid/dist/cdn/perspective-viewer-datagrid.js"
+        ></script>
+        <script
+            type="module"
+            src="https://cdn.jsdelivr.net/npm/@finos/perspective-viewer-d3fc/dist/cdn/perspective-viewer-d3fc.js"
+        ></script>
+
+        <link
+            rel="stylesheet"
+            crossorigin="anonymous"
+            href="https://cdn.jsdelivr.net/npm/@finos/perspective-viewer/dist/css/themes.css"
+        />
+        <link
+            rel="stylesheet"
+            crossorigin="anonymous"
+            href="https://cdn.jsdelivr.net/npm/@finos/perspective-viewer/dist/css/pro.css"
+        />
+
+        <style>
+            *,
+            :before,
+            :after {
+                box-sizing: border-box;
+            }
+
+            .mosaic-example table {
+                display: table;
+                position: relative;
+                table-layout: fixed;
+                border-collapse: separate;
+                border-spacing: 0;
+                font-variant-numeric: tabular-nums;
+                box-sizing: border-box;
+                max-width: initial;
+                width: 800px;
+                min-height: 33px;
+                margin: 0;
+                font-size: 13px;
+                line-height: 15.6px;
+            }
+
+            .mosaic-example thead tr th {
+                position: sticky;
+                top: 0;
+                background: #fff;
+                cursor: ns-resize;
+                border-bottom: solid 1px #ccc;
+            }
+
+            .dark .mosaic-example thead tr th {
+                background: #1e1e20;
+                border-bottom: solid 1px #444;
+            }
+
+            .mosaic-example tbody tr:hover {
+                background: #eef;
+            }
+
+            .dark .mosaic-example tbody tr:hover {
+                background: #224;
+            }
+
+            .mosaic-example th {
+                color: #111;
+                text-align: left;
+                vertical-align: bottom;
+            }
+
+            .mosaic-example td,
+            .mosaic-example th {
+                white-space: nowrap;
+                text-overflow: ellipsis;
+                overflow: hidden;
+                padding: 3px 6.5px 3px 0;
+            }
+
+            .dark .mosaic-example td,
+            .dark .mosaic-example th {
+                color: #ccc;
+            }
+
+            .mosaic-example tbody tr:first-child td {
+                padding-top: 4px;
+            }
+
+            .mosaic-example td,
+            .mosaic-example th {
+                border: none;
+            }
+
+            .mosaic-example td,
+            .mosaic-example tr:not(:last-child) th {
+                border-bottom: solid 1px #eee;
+            }
+
+            .dark .mosaic-example td,
+            .dark .mosaic-example tr:not(:last-child) th {
+                border-bottom: solid 1px #333;
+            }
+
+            .mosaic-example td {
+                color: #444;
+                vertical-align: top;
+            }
+        </style>
+    </head>
+
+    <body>
+        <div id="content" class="mosaic-example"></div>
+        <script type="module">
+            import * as vg from "https://cdn.jsdelivr.net/npm/@uwdata/vgplot@0.15.0/+esm";
+            import {
+                Query,
+                column,
+            } from "https://cdn.jsdelivr.net/npm/@uwdata/mosaic-sql@0.15.0/+esm";
+            import {
+                MosaicClient,
+                clausePoint,
+                Param,
+                isParam,
+                isSelection,
+                toDataColumns,
+            } from "https://cdn.jsdelivr.net/npm/@uwdata/mosaic-core@0.15.0/+esm";
+            import perspective from "https://cdn.jsdelivr.net/npm/@finos/perspective/dist/cdn/perspective.js";
+
+            import {
+                FiltersClient,
+                MultiMenu,
+                multimenu,
+            } from "./js/widgets.js";
+
+            // configure the coordinator to use DuckDB-WASM
+            // creates a new database instance running in-browser
+            vg.coordinator().databaseConnector(vg.wasmConnector());
+
+            vg.coordinator().manager.logQueries(true);
+            vg.coordinator().logger({
+                debug: function (...args) {
+                    console.log(...args);
+                },
+                info: function (...args) {
+                    console.log(...args);
+                },
+                error: function (...args) {
+                    console.log(...args);
+                },
+            });
+
+            // load data into the database
+            // executes a query generated by the loadCSV helper
+            vg.coordinator().exec(
+                vg.loadParquet("data", "http://localhost:8888/data.parquet"),
+            );
+
+            const $query = vg.Selection.intersect();
+
+            const globalFilters = new FiltersClient($query);
+            vg.coordinator().connect(globalFilters);
+
+            class PerspectiveWidget extends MosaicClient {
+                constructor(selection) {
+                    super(selection);
+                    console.log("Constructing Perspective window");
+                    try {
+                        this.selection = selection;
+                        this.element =
+                            document.createElement("perspective-viewer");
+                        this.element.style["width"] = "800px";
+                        this.element.style["height"] = "300px";
+                        this.element.toggleAttribute("selectable", true);
+                        this.element.addEventListener(
+                            "perspective-select",
+                            (e) => {
+                                console.log("Perspective select", e);
+                            },
+                        );
+                        perspective.worker().then((w) => {
+                            this.worker = w;
+                        });
+                        this.first = true;
+                    } catch (error) {
+                        console.log("Error!", error);
+                        throw error;
+                    }
+                }
+
+                query(filter = []) {
+                    console.log("Calling query update", this.selection);
+                    return Query.from("data")
+                        .select([
+                            "product",
+                            "book",
+                            "hierarchy1",
+                            "tradeId",
+                            "pv",
+                            "cr01",
+                        ])
+                        .where(this.selection.predicate(this))
+                        .limit(1000000);
+                }
+
+                queryResult(data) {
+                    console.log("Calling query results for perspective");
+                    try {
+                        let d2 = toDataColumns(data);
+                        console.log("query result", data, d2);
+                        let { numRows, columns } = d2;
+
+                        // for some weird reason Perspective can no longer deal with the Arrow native arrays
+                        // also new Array(...columns.tradeId) doesn't work
+                        columns.tradeId = [...columns.tradeId];
+                        columns.pv = [...columns.pv];
+                        columns.cr01 = [...columns.cr01];
+
+                        if (this.first) {
+                            this.worker.table(columns).then((t) => {
+                                this.ptable = t;
+                                this.element.load(t);
+                            });
+                            this.first = false;
+                        } else {
+                            console.log("Updating table");
+                            this.ptable.replace(columns).then((t) => {
+                                console.log("Updated table");
+                            });
+                        }
+                    } catch (error) {
+                        console.log("Error!", error);
+                        throw error;
+                    }
+
+                    return this;
+                }
+            }
+
+            const perspectiveClient = new PerspectiveWidget($query);
+            vg.coordinator().connect(perspectiveClient);
+
+            // create an area chart, returned as an HTML element
+            // you can subsequently add this to your webpage
+            const chart = vg.vconcat(
+                vg.hconcat(perspectiveClient.element, globalFilters.element),
+                vg.hconcat(
+                    multimenu({
+                        label: "Book",
+                        as: $query,
+                        filterBy: $query,
+                        from: "data",
+                        column: "book",
+                    }),
+                    vg.menu({
+                        label: "Product",
+                        as: $query,
+                        filterBy: $query,
+                        from: "data",
+                        column: "product",
+                    }),
+                    vg.menu({
+                        label: "L1",
+                        as: $query,
+                        filterBy: $query,
+                        from: "data",
+                        column: "hierarchy1",
+                    }),
+                ),
+                vg.hconcat(
+                    vg.plot(
+                        vg.barY(vg.from("data", { filterBy: $query }), {
+                            x: "book",
+                            y: vg.sum("pv"),
+                            fill: "steelblue",
+                            yTickPadding: 200,
+                        }),
+                        vg.toggleX({ as: $query }),
+                        vg.width(650),
+                        vg.height(400),
+                        vg.margins({
+                            left: 100,
+                            top: 50,
+                            right: 10,
+                            bottom: 50,
+                        }),
+                    ),
+                    vg.table({
+                        from: "data",
+                        filterBy: $query,
+                        columns: [
+                            "book",
+                            "product",
+                            "hierarchy1",
+                            "pv",
+                            "cr01",
+                        ],
+                    }),
+                ),
+            );
+
+            document.getElementById("content").appendChild(chart);
+
+            console.log("installed filters client");
+        </script>
+    </body>
+</html>
