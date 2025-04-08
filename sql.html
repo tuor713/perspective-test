@@ -29,8 +29,22 @@
             href="https://cdn.jsdelivr.net/npm/@finos/perspective-viewer/dist/css/pro.css"
         />
         <style type="text/css">
+            #content {
+                display: flex;
+                flex-direction: column;
+                height: 95vh;
+            }
             #sqleditor {
                 width: 80%;
+                margin-top: 2em;
+                margin-left: 2em;
+                border-width: 1px;
+                border-style: solid;
+                border-color: black;
+            }
+
+            #error {
+                color: red;
                 margin-top: 2em;
                 margin-left: 2em;
             }
@@ -38,22 +52,27 @@
             #run {
                 margin-top: 2em;
                 margin-left: 2em;
+                width: fit-content;
             }
 
             #result {
-                width: 80%;
-                height: 50%;
+                flex-grow: 1;
+                margin-top: 2em;
+                margin-left: 2em;
+                min-height: 600px;
             }
         </style>
     </head>
 
     <body>
-        <div id="sqleditor"></div>
+        <div id="content">
+            <div id="sqleditor"></div>
 
-        <button id="run" onclick="window.runHandler()">Run</button>
+            <button id="run" onclick="window.runHandler()">Run</button>
 
-        <span id="error" style="display: none"></span>
-        <perspective-viewer id="result"></perspective-viewer>
+            <span id="error" style="display: none"></span>
+            <perspective-viewer id="result"></perspective-viewer>
+        </div>
 
         <script type="module">
             // lots of trial and error to get the version of @codemirror/state to work
@@ -82,19 +101,20 @@
 
             import perspective from "https://cdn.jsdelivr.net/npm/@finos/perspective/dist/cdn/perspective.js";
 
-            const CLIENT_WASM =
-                "https://cdn.jsdelivr.net/npm/@finos/perspective-viewer/dist/wasm/perspective-viewer.wasm";
-
             window.addEventListener("DOMContentLoaded", async function () {
+                // timeout for client WASM to load
+                await new Promise((r) => setTimeout(r, 2000));
                 console.log("Loading perspective");
-                await Promise.all([fetch(CLIENT_WASM)]);
-                console.log("Loaded wasm");
-
                 const WORKER = await perspective.worker();
                 console.log("Loaded perspective", WORKER);
 
+                var table = undefined;
+
                 window.runHandler = async function () {
                     document.getElementById("error").style.display = "none";
+                    const runButton = document.getElementById("run");
+                    runButton.disabled = true;
+                    runButton.innerText = "Running...";
 
                     const query = myView.state.doc.toString();
                     console.log("Run", query);
@@ -113,11 +133,17 @@
 
                     const resp = await REQ;
 
+                    runButton.innerText = "Run";
+                    runButton.disabled = false;
+
                     if (resp.ok) {
                         const arrow = await resp.arrayBuffer();
                         const table = await WORKER.table(arrow);
 
                         document.getElementById("result").load(table);
+                        document
+                            .getElementById("result")
+                            .restore({ columns: [], plugin: "datagrid" });
                     } else {
                         const respJson = await resp.json();
                         document.getElementById("error").innerText =
