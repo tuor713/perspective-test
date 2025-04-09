@@ -79,6 +79,7 @@
             import {
                 EditorView,
                 keymap,
+                lineNumbers,
             } from "https://cdn.jsdelivr.net/npm/@codemirror/view@6.33.0/+esm";
             import { sql } from "https://cdn.jsdelivr.net/npm/@codemirror/lang-sql@6.8.0/+esm";
             import {
@@ -92,9 +93,19 @@
                 doc: "SELECT * FROM data",
                 extensions: [
                     sql(),
+                    lineNumbers(),
                     indentOnInput(),
                     syntaxHighlighting(defaultHighlightStyle),
                     keymap.of([...defaultKeymap]),
+                    EditorView.theme({
+                        "&": {
+                            height: "auto",
+                            "max-height": "400px",
+                        },
+                        ".cm-scroller": {
+                            overflow: "auto",
+                        },
+                    }),
                 ],
                 parent: document.getElementById("sqleditor"),
             });
