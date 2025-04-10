@@ -164,6 +164,23 @@
                     }
                 };
             });
+
+            document.addEventListener("keydown", function (event) {
+                // Check for Ctrl+Enter (event.ctrlKey is true and key is 'Enter')
+                if (event.ctrlKey && event.key === "Enter") {
+                    // Prevent the default action to avoid any conflicts
+                    event.preventDefault();
+
+                    // Check if window.runHandler exists before calling it
+                    if (typeof window.runHandler === "function") {
+                        window.runHandler();
+                    } else {
+                        console.warn(
+                            "window.runHandler is not defined or not a function",
+                        );
+                    }
+                }
+            });
         </script>
     </body>
 </html>
