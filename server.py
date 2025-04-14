@@ -10,6 +10,7 @@ import perspective
 import pyarrow.feather as feather
 import pyarrow as pa
 import trino
+from trino.auth import BasicAuthentication
 import json
 
 print('Starting data generation')
@@ -98,6 +99,7 @@ class TrinoArrowHandler(tornado.web.RequestHandler):
                 host=host,
                 port=port,
                 user=user,
+                auth=BasicAuthentication(user, password) if password and password != "" else None,
                 catalog=catalog,
                 schema=schema
             )
@@ -127,7 +129,7 @@ app = tornado.web.Application([
     # create a websocket endpoint that the client JavaScript can access
     (r"/websocket", PerspectiveTornadoHandler, {"manager": MANAGER, "check_origin": True}),
     (r"/trino", TrinoArrowHandler),
-    (r"/(.*)", tornado.web.StaticFileHandler, {"path":"./", "default_filename":"index.html"}),
+    (r"/(.*)", tornado.web.StaticFileHandler, {"path":"./", "default_filename":"sql2.html"}),
 ])
 
 print('Starting web server')
