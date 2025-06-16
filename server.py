@@ -64,6 +64,15 @@ print('Initialized perspective')
 
 print('Registered table manager')
 
+def convertToRows(cols, tuples):
+    rows = []
+    for t in tuples:
+        row = {}
+        for i in range(len(cols)):
+            row[cols[i]] = t[i]
+        rows.append(row)
+    return rows
+
 class TrinoArrowHandler(tornado.web.RequestHandler):
     def set_default_headers(self):
         # Allow CORS if needed
@@ -93,6 +102,9 @@ class TrinoArrowHandler(tornado.web.RequestHandler):
             password = request_data.get('password', None)
             catalog = request_data.get('catalog', 'default')
             schema = request_data.get('schema', 'default')
+            format = request_data.get('format', 'arrow')
+
+            print(f"Serving query: {query} from user {user} with format {format}")
 
             # Connect to Trino
             conn = trino.dbapi.connect(
@@ -104,21 +116,37 @@ class TrinoArrowHandler(tornado.web.RequestHandler):
                 schema=schema
             )
 
-            df = pd.read_sql(query, conn)
+            if format == 'arrow':
+                df = pd.read_sql(query, conn)
 
-            # Convert DataFrame to Arrow Table
-            table = pa.Table.from_pandas(df)
+                # Convert DataFrame to Arrow Table
+                table = pa.Table.from_pandas(df)
 
-            # Serialize to Arrow IPC format
-            sink = pa.BufferOutputStream()
-            writer = pa.ipc.new_stream(sink, table.schema)
-            writer.write_table(table)
-            writer.close()
-            arrow_bytes = sink.getvalue().to_pybytes()
+                # Serialize to Arrow IPC format
+                sink = pa.BufferOutputStream()
+                writer = pa.ipc.new_stream(sink, table.schema)
+                writer.write_table(table)
+                writer.close()
+                arrow_bytes = sink.getvalue().to_pybytes()
 
-            # Set appropriate headers and return the Arrow IPC bytes
-            self.set_header('Content-Type', 'application/octet-stream')
-            self.write(arrow_bytes)
+                # Set appropriate headers and return the Arrow IPC bytes
+                self.set_header('Content-Type', 'application/octet-stream')
+                self.write(arrow_bytes)
+            elif format == 'json':
+                cur = conn.cursor()
+                cur.execute(query)
+                columns = [cd.name for cd in cur.description]
+                self.set_header('Content-Type', 'application/json')
+                self.write(
+                    {
+                        "columns": columns,
+                        "types": [cd.type_code for cd in cur.description],
+                        "query": query,
+                        "rows": convertToRows(columns, cur.fetchall()),
+                        "error": None,
+                        "connectionTested": True
+                    }
+                )
 
         except Exception as e:
             print(e)
