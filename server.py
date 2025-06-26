@@ -69,7 +69,10 @@ def convertToRows(cols, tuples):
     for t in tuples:
         row = {}
         for i in range(len(cols)):
-            row[cols[i]] = t[i]
+            if isinstance(t[i], datetime):
+                row[cols[i]] = t[i].isoformat()
+            else:
+                row[cols[i]] = t[i]
         rows.append(row)
     return rows
 
