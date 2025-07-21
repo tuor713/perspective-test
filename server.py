@@ -1,6 +1,8 @@
 import tornado.websocket
 import tornado.web
 import tornado.ioloop
+from tornado.concurrent import run_on_executor
+from concurrent.futures import ThreadPoolExecutor
 
 from perspective import Table, PerspectiveManager, PerspectiveTornadoHandler
 from datetime import date, datetime
@@ -77,6 +79,8 @@ def convertToRows(cols, tuples):
     return rows
 
 class TrinoArrowHandler(tornado.web.RequestHandler):
+    executor = ThreadPoolExecutor(max_workers=4)
+
     def set_default_headers(self):
         # Allow CORS if needed
         self.set_header("Access-Control-Allow-Origin", "*")
@@ -87,6 +91,57 @@ class TrinoArrowHandler(tornado.web.RequestHandler):
         # Handle preflight requests
         self.set_status(204)
         self.finish()
+
+    @run_on_executor
+    def execute_query_arrow(self, host, port, user, password, catalog, schema, query):
+        """Execute query and return arrow bytes - runs on executor thread"""
+        conn = trino.dbapi.connect(
+            host=host,
+            port=port,
+            user=user,
+            auth=BasicAuthentication(user, password) if password and password != "" else None,
+            catalog=catalog,
+            schema=schema
+        )
+
+        df = pd.read_sql(query, conn)
+
+        # Convert DataFrame to Arrow Table
+        table = pa.Table.from_pandas(df)
+
+        # Serialize to Arrow IPC format
+        sink = pa.BufferOutputStream()
+        writer = pa.ipc.new_stream(sink, table.schema)
+        writer.write_table(table)
+        writer.close()
+        arrow_bytes = sink.getvalue().to_pybytes()
+
+        return arrow_bytes
+
+    @run_on_executor
+    def execute_query_json(self, host, port, user, password, catalog, schema, query):
+        """Execute query and return JSON data - runs on executor thread"""
+        conn = trino.dbapi.connect(
+            host=host,
+            port=port,
+            user=user,
+            auth=BasicAuthentication(user, password) if password and password != "" else None,
+            catalog=catalog,
+            schema=schema
+        )
+
+        cur = conn.cursor()
+        cur.execute(query)
+        columns = [cd.name for cd in cur.description]
+
+        return {
+            "columns": columns,
+            "types": [cd.type_code for cd in cur.description],
+            "query": query,
+            "rows": convertToRows(columns, cur.fetchall()),
+            "error": None,
+            "connectionTested": True
+        }
 
     async def post(self):
         try:
@@ -109,47 +164,21 @@ class TrinoArrowHandler(tornado.web.RequestHandler):
 
             print(f"Serving query: {query} from user {user} with format {format}")
 
-            # Connect to Trino
-            conn = trino.dbapi.connect(
-                host=host,
-                port=port,
-                user=user,
-                auth=BasicAuthentication(user, password) if password and password != "" else None,
-                catalog=catalog,
-                schema=schema
-            )
-
             if format == 'arrow':
-                df = pd.read_sql(query, conn)
-
-                # Convert DataFrame to Arrow Table
-                table = pa.Table.from_pandas(df)
-
-                # Serialize to Arrow IPC format
-                sink = pa.BufferOutputStream()
-                writer = pa.ipc.new_stream(sink, table.schema)
-                writer.write_table(table)
-                writer.close()
-                arrow_bytes = sink.getvalue().to_pybytes()
+                arrow_bytes = await self.execute_query_arrow(
+                    host, port, user, password, catalog, schema, query
+                )
 
                 # Set appropriate headers and return the Arrow IPC bytes
                 self.set_header('Content-Type', 'application/octet-stream')
                 self.write(arrow_bytes)
             elif format == 'json':
-                cur = conn.cursor()
-                cur.execute(query)
-                columns = [cd.name for cd in cur.description]
-                self.set_header('Content-Type', 'application/json')
-                self.write(
-                    {
-                        "columns": columns,
-                        "types": [cd.type_code for cd in cur.description],
-                        "query": query,
-                        "rows": convertToRows(columns, cur.fetchall()),
-                        "error": None,
-                        "connectionTested": True
-                    }
+                json_data = await self.execute_query_json(
+                    host, port, user, password, catalog, schema, query
                 )
+
+                self.set_header('Content-Type', 'application/json')
+                self.write(json_data)
 
         except Exception as e:
             print(e)
@@ -162,6 +191,14 @@ app = tornado.web.Application([
     (r"/trino", TrinoArrowHandler),
     (r"/(.*)", tornado.web.StaticFileHandler, {"path":"./", "default_filename":"sql2.html"}),
 ])
+
+# Add CORS headers to all responses
+def add_cors_headers(self):
+    self.set_header("Access-Control-Allow-Origin", "*")
+    self.set_header("Access-Control-Allow-Headers", "Content-Type")
+    self.set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+
+tornado.web.RequestHandler.set_default_headers = add_cors_headers
 
 print('Starting web server')
 # Start the Tornado server
