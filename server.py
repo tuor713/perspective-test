@@ -93,7 +93,7 @@ class TrinoArrowHandler(tornado.web.RequestHandler):
         self.finish()
 
     @run_on_executor
-    def execute_query_arrow(self, host, port, user, password, catalog, schema, query):
+    def execute_query_arrow(self, host, port, user, password, catalog, schema, query, extraCredentials):
         """Execute query and return arrow bytes - runs on executor thread"""
         conn = trino.dbapi.connect(
             host=host,
@@ -101,7 +101,8 @@ class TrinoArrowHandler(tornado.web.RequestHandler):
             user=user,
             auth=BasicAuthentication(user, password) if password and password != "" else None,
             catalog=catalog,
-            schema=schema
+            schema=schema,
+            extra_credential=extraCredentials
         )
 
         df = pd.read_sql(query, conn)
@@ -119,7 +120,7 @@ class TrinoArrowHandler(tornado.web.RequestHandler):
         return arrow_bytes
 
     @run_on_executor
-    def execute_query_json(self, host, port, user, password, catalog, schema, query):
+    def execute_query_json(self, host, port, user, password, catalog, schema, query, extraCredentials):
         """Execute query and return JSON data - runs on executor thread"""
         conn = trino.dbapi.connect(
             host=host,
@@ -127,7 +128,8 @@ class TrinoArrowHandler(tornado.web.RequestHandler):
             user=user,
             auth=BasicAuthentication(user, password) if password and password != "" else None,
             catalog=catalog,
-            schema=schema
+            schema=schema,
+            extra_credential=extraCredentials
         )
 
         cur = conn.cursor()
@@ -162,11 +164,18 @@ class TrinoArrowHandler(tornado.web.RequestHandler):
             schema = request_data.get('schema', 'default')
             format = request_data.get('format', 'arrow')
 
+            extraCredentials = request_data.get('extraCredentials', None)
+            tuplifiedExtraCredentials = None
+            if extraCredentials is not None:
+                tuplifiedExtraCredentials = []
+                for cred in extraCredentials:
+                    tuplifiedExtraCredentials.append((cred[0], cred[1]))
+
             print(f"Serving query: {query} from user {user} with format {format}")
 
             if format == 'arrow':
                 arrow_bytes = await self.execute_query_arrow(
-                    host, port, user, password, catalog, schema, query
+                    host, port, user, password, catalog, schema, query, tuplifiedExtraCredentials
                 )
 
                 # Set appropriate headers and return the Arrow IPC bytes
@@ -174,7 +183,7 @@ class TrinoArrowHandler(tornado.web.RequestHandler):
                 self.write(arrow_bytes)
             elif format == 'json':
                 json_data = await self.execute_query_json(
-                    host, port, user, password, catalog, schema, query
+                    host, port, user, password, catalog, schema, query, tuplifiedExtraCredentials
                 )
 
                 self.set_header('Content-Type', 'application/json')
